@@ -26,6 +26,10 @@
   <record id="ch_and_li" model="res.country.group">
     <field name="code">CH-LI</field>
   </record>
+  <record id="dom-tom" model="res.country.group">
+    <field name="country_ids" eval="[Command.set([                 ref('yt'),ref('gp'),ref('mq'),ref('gf'),ref('re'),                 ref('pf'),ref('pm'),ref('mf'),ref('bl'),ref('nc'),             ])]"/>
+    <field name="code">DOM-TOM</field>
+  </record>
   <record id="eurasian_economic_union" model="res.country.group">
     <field name="code">EEU</field>
   </record>
