@@ -2,6 +2,11 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
 from openupgradelib import openupgrade
+from odoo.upgrade import util
+import logging
+import datetime
+_logger = logging.getLogger(__name__)
+
 
 field_renames = [
     ("account.move", "account_move", "payment_id", "origin_payment_id"),
@@ -41,6 +46,14 @@ _new_columns = [
     ("account.payment", "is_sent", "boolean"),
     ("account.move", "made_sequence_gap", "boolean", True),
 ]
+
+def explode_execute(*args, **kwargs):
+    query = args[1] if len(args) > 1 else kwargs.get("query")
+    _logger.info("Execute a query in parallel: %s", query)
+    start_time = datetime.datetime.now()
+    util.explode_execute(*args, **kwargs)
+    end_time = datetime.datetime.now()
+    _logger.info("Query executed in parallel in %s", (end_time - start_time))
 
 
 def _drop_sql_views(env):
@@ -85,7 +98,7 @@ def rename_selection_option(env):
 
 
 def update_account_move_amount_untaxed_in_currency_signed(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move
@@ -93,16 +106,18 @@ def update_account_move_amount_untaxed_in_currency_signed(env):
             WHEN move_type IN ('out_invoice', 'in_refund', 'out_receipt')
                 THEN COALESCE(amount_untaxed, 0.0)
             ELSE (-1) * COALESCE(amount_untaxed, 0.0) END""",
+        table="account_move",
     )
 
 
 def update_account_move_checked(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move
         SET checked = TRUE
         WHERE to_check IS DISTINCT FROM TRUE""",
+        table="account_move",
     )
 
 
@@ -127,25 +142,27 @@ def fill_account_move_preferred_payment_method_line_id(env):
 
 def adapt_account_move_sending_data(env):
     # sp_partner_id -> author_partner_id:
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move
         SET sending_data = jsonb_set(sending_data::jsonb - 'sp_partner_id',
             '{author_partner_id}', sending_data::jsonb->'sp_partner_id')
         WHERE sending_data IS NOT NULL AND sending_data::jsonb ? 'sp_partner_id'""",
+        table="account_move",        
     )
     # sp_user_id -> author_user_id:
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move
         SET sending_data = jsonb_set(sending_data::jsonb - 'sp_user_id',
             '{author_user_id}', sending_data::jsonb->'sp_user_id')
         WHERE sending_data IS NOT NULL AND sending_data::jsonb ? 'sp_user_id'""",
+        table="account_move",
     )
     # send_mail: True -> 'sending_methods': ["email"]:
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move
@@ -153,11 +170,12 @@ def adapt_account_move_sending_data(env):
             '{sending_methods}', '["email"]'::jsonb)
         WHERE sending_data IS NOT NULL
             AND sending_data::jsonb @> '{"send_mail": "true"}'::jsonb""",
+        table="account_move",
     )
 
 
 def fill_account_payment(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_payment ap
@@ -176,6 +194,8 @@ def fill_account_payment(env):
         FROM account_move am
         LEFT JOIN account_journal aj ON am.journal_id = aj.id
         WHERE ap.move_id = am.id""",
+        table="account_payment",
+        alias="ap",
     )
 
 
@@ -199,7 +219,7 @@ def fill_statement_line_fields(env):
 
 
 def fill_account_move_made_sequence_gap(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move am
@@ -210,6 +230,8 @@ def fill_account_move_made_sequence_gap(env):
             AND am.sequence_number = am2.sequence_number + 1
             AND am.sequence_number > 1
         """,
+        table="account_move",
+        alias="am",
     )
 
 

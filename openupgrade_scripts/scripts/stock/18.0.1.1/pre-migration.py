@@ -1,9 +1,14 @@
 # Copyright 2025 ForgeFlow S.L. (https://www.forgeflow.com)
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from openupgradelib import openupgrade
+from odoo.upgrade import util
+import logging
+import datetime
+_logger = logging.getLogger(__name__)
+
 
 _columns_copy = {
-    "stock_move": [("location_dest_id", None, None)],
+    #"stock_move": [("location_dest_id", None, None)],
 }
 
 _field_renames = [
@@ -28,19 +33,27 @@ _new_columns = [
     ("stock.putaway.rule", "sublocation", "selection", "no"),
 ]
 
+def explode_execute(*args, **kwargs):
+    query = args[1] if len(args) > 1 else kwargs.get("query")
+    _logger.info("Execute a query in parallel: %s", query)
+    start_time = datetime.datetime.now()
+    util.explode_execute(*args, **kwargs)
+    end_time = datetime.datetime.now()
+    _logger.info("Query executed in parallel in %s", (end_time - start_time))
 
 def fill_product_template_is_storable(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE product_template
         SET is_storable = TRUE, type = 'consu'
         WHERE type = 'product'""",
+        table="product_template",
     )
 
 
 def fill_stock_move_location_dest_id(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE stock_move sm2
@@ -51,8 +64,10 @@ def fill_stock_move_location_dest_id(env):
         LEFT JOIN stock_picking_type spt ON sm.picking_type_id = spt.id
         WHERE sm2.id = sm.id
         """,
+        table="stock_move",
+        alias="sm2",
     )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         WITH RECURSIVE sub AS (
@@ -70,10 +85,12 @@ def fill_stock_move_location_dest_id(env):
         FROM stock_rule sr, stock_move sm
         JOIN sub ON sub.move_dest_id = sm.id
         WHERE sm2.rule_id = sr.id AND sub.move_orig_id = sm2.id
-            AND sr.action IN ('push', 'pull_push')
+            AND sr.action IN ('push', 'pull_push')        
         """,
+        table="stock_move",
+        alias="sm2",
     )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         WITH sub AS (
@@ -84,6 +101,7 @@ def fill_stock_move_location_dest_id(env):
                 AND sr.location_dest_id != sm.location_final_id
                 AND sr.location_dest_id != sm.location_dest_id
                 AND sr.action IN ('pull', 'pull_push')
+                AND {parallel_filter}            
             RETURNING rule_id
         ), sub2 AS (
             SELECT rule_id
@@ -95,6 +113,8 @@ def fill_stock_move_location_dest_id(env):
         FROM sub2
         WHERE sub2.rule_id = sr.id
         """,
+        table="stock_move",
+        alias="sm",
     )
     openupgrade.logged_query(
         env.cr,
@@ -125,6 +145,17 @@ def fill_stock_putaway_rule_sublocation(env):
         WHERE storage_category_id is not null""",
     )
 
+def copy_column_location_dest_id(env):
+    env.cr.execute("ALTER TABLE stock_move ADD COLUMN openupgrade_legacy_18_0_location_dest_id integer;")
+    explode_execute(
+        env.cr,
+        """
+        UPDATE stock_move
+        SET openupgrade_legacy_18_0_location_dest_id = location_dest_id
+        WHERE location_dest_id IS NOT NULL
+        """,
+        table="stock_move",
+    )
 
 @openupgrade.migrate()
 def migrate(env, version=None):
@@ -135,6 +166,7 @@ def migrate(env, version=None):
             {"product_template": [("responsible_id", None)]},
         )
     openupgrade.copy_columns(env.cr, _columns_copy)
+    copy_column_location_dest_id(env)
     openupgrade.rename_fields(env, _field_renames)
     openupgrade.rename_xmlids(env.cr, _xmlid_renames)
     openupgrade.add_columns(env, _new_columns)
