@@ -36,6 +36,7 @@ _new_columns = [
 
 def explode_execute(cr, query, *args, **kwargs):
     _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
     with db_connect(cr.dbname).cursor() as cr2:
         start_time = datetime.datetime.now()
         util.explode_execute(cr2, query, *args, **kwargs)
