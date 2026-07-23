@@ -4,6 +4,7 @@ from openupgradelib import openupgrade
 from odoo.upgrade import util
 import logging
 import datetime
+from odoo.sql_db import db_connect
 _logger = logging.getLogger(__name__)
 
 
@@ -33,13 +34,13 @@ _new_columns = [
     ("stock.putaway.rule", "sublocation", "selection", "no"),
 ]
 
-def explode_execute(*args, **kwargs):
-    query = args[1] if len(args) > 1 else kwargs.get("query")
+def explode_execute(cr, query, *args, **kwargs):
     _logger.info("Execute a query in parallel: %s", query)
-    start_time = datetime.datetime.now()
-    util.explode_execute(*args, **kwargs)
-    end_time = datetime.datetime.now()
-    _logger.info("Query executed in parallel in %s", (end_time - start_time))
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
 
 def fill_product_template_is_storable(env):
     explode_execute(
