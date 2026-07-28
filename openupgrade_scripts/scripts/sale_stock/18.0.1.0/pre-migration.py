@@ -2,13 +2,28 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from openupgradelib import openupgrade
 
+from odoo.upgrade import util
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
+
 _new_columns = [
     ("sale.order.line", "warehouse_id", "many2one"),
 ]
 
 
 def fill_sale_order_line_warehouse_id(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE sale_order_line sol
@@ -16,8 +31,10 @@ def fill_sale_order_line_warehouse_id(env):
         FROM sale_order so
         WHERE sol.order_id = so.id AND sol.route_id IS NULL
         """,
+        table="sale_order_line",
+        alias="sol",
     )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         WITH sub as (
@@ -53,6 +70,8 @@ def fill_sale_order_line_warehouse_id(env):
         ) sub2 ON TRUE
         WHERE sol.id = sol2.id AND sol.route_id IS NOT NULL
         """,
+        table="sale_order_line",
+        alias="sol2",
     )
 
 

@@ -2,6 +2,20 @@
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
 from openupgradelib import openupgrade
 
+from odoo.upgrade import util
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
 
 def _adjust_stock_picking_batch_sequence(env):
     """As the order in the tree view and report is now by batch_sequence,
@@ -10,7 +24,7 @@ def _adjust_stock_picking_batch_sequence(env):
     because this new field does not have a default value.
     The order is taken from the picking model.
     """
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE stock_picking sp
@@ -25,6 +39,8 @@ def _adjust_stock_picking_batch_sequence(env):
         ) as sub
         WHERE sub.id = sp.id
         """,
+        table="stock_picking",
+        alias="sp"
     )
 
 

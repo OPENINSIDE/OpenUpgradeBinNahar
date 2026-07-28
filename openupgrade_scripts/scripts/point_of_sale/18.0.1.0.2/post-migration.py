@@ -4,6 +4,20 @@
 from uuid import uuid4
 
 from openupgradelib import openupgrade
+from odoo.upgrade import util
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
 
 
 def fill_pos_config_token(env):
@@ -15,7 +29,7 @@ def fill_pos_config_token(env):
 
 
 def fill_pos_order_reversed_pos_order_id(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE account_move am2
@@ -34,6 +48,8 @@ def fill_pos_order_reversed_pos_order_id(env):
             AND am2.ref like CONCAT('%', session_move.name, '%')
             AND am2.ref like CONCAT('% ', po.name, '%')
             AND am2.ref like CONCAT('%', ps.name, '%')""",
+        table="account_move",
+        alias="am2",
     )
 
 
@@ -87,19 +103,21 @@ def update_pos_config_show_images(env):
 
 
 def fill_pos_uuid(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE pos_order
         SET uuid = gen_random_uuid()
         """,
+        table="pos_order",
     )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE pos_payment
         SET uuid = gen_random_uuid()
         """,
+        table="pos_payment",
     )
 
 

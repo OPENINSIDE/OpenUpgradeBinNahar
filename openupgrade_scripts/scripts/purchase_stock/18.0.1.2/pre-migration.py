@@ -2,6 +2,22 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 from openupgradelib import openupgrade
 
+from odoo.upgrade import util
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
+
+
 _new_columns = [
     ("purchase.order.line", "group_id", "many2one"),
     ("purchase.order.line", "location_final_id", "many2one"),
@@ -10,7 +26,7 @@ _new_columns = [
 
 
 def fill_purchase_order_line_group_id(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE purchase_order_line pol
@@ -21,8 +37,10 @@ def fill_purchase_order_line_group_id(env):
         WHERE sm.purchase_line_id = pol.id
             AND pol.group_id IS NULL AND sr.group_id IS NOT NULL
         """,
+        table="purchase_order_line",
+        alias="pol",
     )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE purchase_order_line pol
@@ -32,6 +50,8 @@ def fill_purchase_order_line_group_id(env):
             sr.group_propagation_option = 'propagate'
         WHERE pol.order_id = po.id AND pol.group_id IS NULL
         """,
+        table="purchase_order_line",
+        alias="pol",
     )
     if openupgrade.column_exists(env.cr, "purchase_order_line", "sale_line_id"):
         openupgrade.logged_query(
@@ -46,7 +66,7 @@ def fill_purchase_order_line_group_id(env):
             WHERE pol.sale_line_id = sol.id AND pol.group_id IS NULL
             """,
         )
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE purchase_order_line pol
@@ -54,11 +74,13 @@ def fill_purchase_order_line_group_id(env):
         FROM stock_move sm
         WHERE sm.purchase_line_id = pol.id AND pol.group_id IS NULL
         """,
+        table="purchase_order_line",
+        alias="pol",
     )
 
 
 def fill_purchase_order_line_location_final_id(env):
-    openupgrade.logged_query(
+    explode_execute(
         env.cr,
         """
         UPDATE purchase_order_line pol
@@ -66,6 +88,8 @@ def fill_purchase_order_line_location_final_id(env):
         FROM stock_move sm
         WHERE sm.purchase_line_id = pol.id
         """,
+        table="purchase_order_line",
+        alias="pol",
     )
 
 
