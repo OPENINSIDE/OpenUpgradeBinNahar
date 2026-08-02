@@ -7,6 +7,21 @@ from openupgradelib import openupgrade
 
 from odoo.orm.commands import Command
 
+from odoo.upgrade import util
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
+
 
 def account_reconcile_model(env):
     """
@@ -168,7 +183,8 @@ def account_move_line_no_followup(env):
     """
     Set no_followup = True on lines of journals of type 'general'
     """
-    env.cr.execute(
+    explode_execute(
+        env.cr,
         """
         UPDATE account_move_line
         SET no_followup=True
@@ -176,7 +192,8 @@ def account_move_line_no_followup(env):
         WHERE
         account_move_line.journal_id=account_journal.id AND
         account_journal.type = 'general'
-        """
+        """,
+        table="account_move_line"
     )
 
 
