@@ -4,7 +4,7 @@
 from openupgradelib import openupgrade
 
 from odoo import fields
-
+from odoo.upgrade import util
 
 def update_from_coa_generic(env, spec):
     """
@@ -101,10 +101,13 @@ def stock_move_is_fields(env):
             ("state", "=", "done"),
         ]
     )
-    for records in openupgrade.chunked(moves):
-        records._compute_is_in()
-        records._compute_is_out()
-        records._compute_is_dropship()
+    move_ids = moves.ids
+    util.recompute_fields(env.cr, "stock.move", ["is_in", "is_out", "is_dropship"], ids=move_ids)
+    
+    # for records in openupgrade.chunked(moves):
+    #     records._compute_is_in()
+    #     records._compute_is_out()
+    #     records._compute_is_dropship()
 
 
 @openupgrade.migrate()
