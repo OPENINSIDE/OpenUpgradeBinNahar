@@ -93,20 +93,24 @@ def stock_location_valuation_account_id(env):
     )
 
 def stock_move_value(env):
+    """
+    Set stock.move#value to sum of product.value#value for this move
+    """
     cr = env.cr
     queries = []
     cr.execute("SELECT min(id), max(id) FROM stock_move")
     min_id, max_id = cr.fetchone()
     batch_size = 10000
+    
     for start_id in range(min_id, max_id + 1, batch_size):
         end_id = start_id + batch_size - 1
         queries.append(
             f"""
             UPDATE stock_move
-            SET value=aggregated_values.value
+            SET value=aggregated_values.agg_value
             FROM (
                 SELECT
-                move_id, sum(value) value
+                move_id, sum(value) AS agg_value
                 FROM
                 product_value
                 WHERE move_id BETWEEN {start_id} AND {end_id}
