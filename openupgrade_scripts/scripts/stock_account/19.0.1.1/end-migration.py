@@ -6,6 +6,20 @@ from openupgradelib import openupgrade
 from odoo import fields
 from odoo.upgrade import util
 
+import logging
+import datetime
+from odoo.sql_db import db_connect
+_logger = logging.getLogger(__name__)
+
+def explode_execute(cr, query, *args, **kwargs):
+    _logger.info("Execute a query in parallel: %s", query)
+    cr.commit()  # Commit the current transaction before executing in parallel
+    with db_connect(cr.dbname).cursor() as cr2:
+        start_time = datetime.datetime.now()
+        util.explode_execute(cr2, query, *args, **kwargs)
+        end_time = datetime.datetime.now()
+        _logger.info("Query executed in parallel in %s", (end_time - start_time))
+
 def update_from_coa_generic(env, spec):
     """
     Update some models from the COA according to spec:
@@ -99,18 +113,42 @@ def stock_move_is_fields(env):
     """
     Run compute methods for  stock.move#is_*
     """
-    moves = env["stock.move"].search(
-        [
-            ("state", "=", "done"),
-        ]
-    )
-    move_ids = moves.ids
-    util.recompute_fields(env.cr, "stock.move", ["is_in", "is_out", "is_dropship"], ids=move_ids)
+    # moves = env["stock.move"].search(
+    #     [
+    #         ("state", "=", "done"),
+    #     ]
+    # )
+    # move_ids = moves.ids
+    # util.recompute_fields(env.cr, "stock.move", ["is_in", "is_out", "is_dropship"], ids=move_ids)
     
     # for records in openupgrade.chunked(moves):
     #     records._compute_is_in()
     #     records._compute_is_out()
     #     records._compute_is_dropship()
+    
+    query = """
+UPDATE stock_move
+SET
+is_in = CASE
+	WHEN src_location.usage NOT IN ('internal', 'transit') AND dest_location.usage IN ('internal', 'transit') THEN TRUE
+	ELSE FALSE
+END,
+is_out = CASE
+	WHEN src_location.usage IN ('internal', 'transit') AND dest_location.usage NOT IN ('internal', 'transit') THEN TRUE
+	ELSE FALSE
+END,
+is_dropship = CASE
+	WHEN src_location.usage ='supplier' AND dest_location.usage ='customer' THEN TRUE
+	ELSE FALSE
+END
+
+FROM stock_location src_location,stock_location dest_location 
+WHERE src_location.id = stock_move.location_id
+AND dest_location.id = stock_move.location_dest_id
+AND stock_move.state = 'done'
+"""    
+
+    explode_execute(env.cr, query, table = "stock_move")
 
 
 @openupgrade.migrate()
